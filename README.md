@@ -60,6 +60,66 @@ Many 2.4GHz dongles do not officially support USB wakeup (i.e., they lack a powe
 
 This behavior is required and ensures that devices with broken or missing wakeup support are still handled safely.
 
+## 🧰 How to Get VENDOR_ID, PRODUCT_ID, and SERIAL
+
+To configure `dongles.conf` accurately, you need the USB Vendor ID, Product ID, and optionally the device Serial Number. These values help the suspend script uniquely identify your dongle and distinguish between different states (e.g., idle vs. active).
+
+### 🧪 Steps to Identify Your Dongle
+
+1. **Disconnect your 2.4GHz dongle** from the system.
+
+2. **Run** the following command in a terminal:
+```
+   dmesg -w
+```
+Press **Enter** a few times to create visual space.
+
+3. Connect the dongle, and observe the new messages that appear.
+
+You'll see output similar to:
+```
+[  607.703432] usb 1-1: new full-speed USB device number 10 using xhci_hcd
+[  607.834879] usb 1-1: New USB device found, idVendor=2dc8, idProduct=3109, bcdDevice= 2.00
+[  607.834887] usb 1-1: Product: IDLE
+[  607.834889] usb 1-1: Manufacturer: 8BitDo
+[  607.834890] usb 1-1: SerialNumber: E417D81715AD
+```
+This is the idle state of the dongle (no controller connected).
+
+Now **turn on or pair your controller**, and you’ll see a second entry:
+```
+[  797.550778] usb 1-1: new full-speed USB device number 11 using xhci_hcd
+[  797.683580] usb 1-1: New USB device found, idVendor=2dc8, idProduct=3106, bcdDevice= 1.14
+[  797.683602] usb 1-1: Product: 8BitDo Ultimate wireless Controller for PC
+[  797.683611] usb 1-1: SerialNumber: E417D81715AD
+```
+
+📌 What to Extract
+
+From each connection state (idle and active), extract:
+
+*    `idVendor` → Vendor ID (e.g., `2dc8`)
+
+*    `idProduct` → Product ID (e.g., `3109` for idle, `3106` for active)
+
+*    `SerialNumber` → Device serial (e.g., `E417D81715AD`)
+
+You can now configure your `dongles.conf` like this:
+```
+# Strict match with serial (recommended)
+2dc8:3106:e417d81715ad  # Active state
+2dc8:3109:e417d81715ad  # Idle state
+
+# With waitdock (only suspend if docked)
+2dc8:3106:e417d81715ad:waitdock
+
+# Fallback match (less specific)
+2dc8:3106
+2dc8:3109
+```
+✅ Note: All values must be in lowercase and must not include 0x.
+This method ensures your dongle is handled correctly based on its connection state.
+
 🔧 Example dongles.conf
 
 This configuration file controls which dongles are managed during suspend/resume.
