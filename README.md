@@ -112,7 +112,7 @@ ACTION=="add|change", SUBSYSTEMS=="usb", ATTRS{idVendor}=="2dc8", ATTRS{idProduc
 
 *   **Vendor ID 2dc8 / Product ID 3106** represents the **active state** of the dongle.   
 *   **Vendor ID 2dc8 / Product ID 3109** is used when the dongle switches to **idle or sleep mode**.
-*     These rules automatically enable or disable `power/wakeup` dynamically based on the USB device's current state.
+* These rules automatically enable or disable `power/wakeup` dynamically based on the USB device's current state.
 
 This is useful for advanced control over suspend behavior and can help prevent wake-up loops or power drain when idle.
 
