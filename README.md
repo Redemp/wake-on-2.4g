@@ -60,11 +60,36 @@ Many 2.4GHz dongles do not officially support USB wakeup (i.e., they lack a powe
 
 This behavior is required and ensures that devices with broken or missing wakeup support are still handled safely.
 
-## 🧰 How to Get VENDOR_ID, PRODUCT_ID, and SERIAL
+## 🧰 How to Get `VENDOR_ID`, `PRODUCT_ID`, and `SERIAL`
 
-To configure `dongles.conf` accurately, you need the USB Vendor ID, Product ID, and optionally the device Serial Number. These values help the suspend script uniquely identify your dongle and distinguish between different states (e.g., idle vs. active).
+To configure `dongles.conf` accurately, you need the USB **Vendor ID**, **Product ID**, and optionally the **Serial Number**. These values help the suspend script uniquely identify your dongle and distinguish between different states (e.g., idle vs. active).
 
-### 🧪 Steps to Identify Your Dongle
+---
+
+### ✅ Recommended: Use the USB Device Scanner Tool (Automated)
+
+Instead of finding these values manually, you can use the companion script from this repository:
+
+👉 **[USB Device Scanner with Wakeup Support & JSON Export](https://github.com/Redemp/USB-Device-Scanner-with-Wakeup-Support-JSON-Export)**
+
+This tool simplifies the process by:
+
+- ✅ Scanning and displaying all connected USB devices in a structured, tree-style layout  
+- ✅ Highlighting important identifiers like:
+  - `idVendor`
+  - `idProduct`
+  - `SerialNumber`
+  - Product name and manufacturer
+  - Device class, protocol, USB version, speed
+  - Wakeup support status
+- ✅ Showing USB hub/device hierarchy using visual connectors (├─, │, └─)
+- ✅ Allowing optional **JSON export** of all device details for scripting and record-keeping
+
+This is the easiest and most reliable way to get all the needed identifiers for your dongle without digging through logs manually.
+
+---
+
+### 🧪 Steps to Identify Your Dongle - Manual Method (Advanced Users)
 
 1. **Disconnect your 2.4GHz dongle** from the system.
 
