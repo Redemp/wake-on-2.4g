@@ -78,12 +78,12 @@ for entry in "${MATCHED_DEVICES[@]}"; do
     IFS="|" read -r DONGLE DEVKEY <<< "$entry"
     [[ -z "${WAITDONGLE[$DEVKEY]}" ]] && continue
 
-    echo "[DongleSuspend] Waiting for $DONGLE to report docked (ID 3109)..."
+    echo "[DongleSuspend] Waiting for $DONGLE to report docked (ID ${idle_pid})..."
     timeout=$TIMEOUT
     while [[ $timeout -gt 0 ]]; do
         current_product=$(cat "/sys/bus/usb/devices/$DONGLE/idProduct" 2>/dev/null)
         if [[ "$current_product" == "3109" ]]; then
-            echo "[DongleSuspend] Docked state confirmed (3109)"
+            echo "[DongleSuspend] Docked state confirmed (${idle_pid})"
             break
         fi
         sleep 1
