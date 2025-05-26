@@ -12,7 +12,7 @@ Many 2.4GHz USB dongles stop working after suspend/resume due to driver unbindin
 - **Mandatory**: Force-enables USB wakeup (`power/wakeup`) for all connected USB devices
 - Uses a config file to define which dongles to unbind/rebind during suspend
 - Compatible with Batocera, but works on most Linux distributions
-- Includes a `force_usb_wakeup_all` service that can be enabled through EmulationStation
+- Includes a `force_usb_wakeup_all` service that must be enabled through EmulationStation
 - Debug-friendly output with logging support
 - Ensures safe driver rebinding using kernel paths
 
