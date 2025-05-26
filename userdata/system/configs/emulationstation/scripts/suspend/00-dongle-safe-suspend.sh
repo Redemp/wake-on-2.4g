@@ -78,12 +78,17 @@ for entry in "${MATCHED_DEVICES[@]}"; do
     IFS="|" read -r DONGLE DEVKEY <<< "$entry"
     [[ -z "${WAITDONGLE[$DEVKEY]}" ]] && continue
 
-    echo "[DongleSuspend] Waiting for $DONGLE to report docked (ID ${idle_pid})..."
+    # Record idle state PID at time of suspend check
+    idle_pid=$(cat "/sys/bus/usb/devices/$DONGLE/idProduct" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+
+    echo "[DongleSuspend] Waiting for $DONGLE to return to docked state (ID ${idle_pid})..."
     timeout=$TIMEOUT
     while [[ $timeout -gt 0 ]]; do
-        current_product=$(cat "/sys/bus/usb/devices/$DONGLE/idProduct" 2>/dev/null)
-        if [[ "$current_product" == "3109" ]]; then
+        current_product=$(cat "/sys/bus/usb/devices/$DONGLE/idProduct" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        if [[ "$current_product" == "$idle_pid" ]]; then
             echo "[DongleSuspend] Docked state confirmed (${idle_pid})"
+            echo "[DongleSuspend] Waiting 1 second to ensure wakeup rules apply..."
+            sleep 1
             break
         fi
         sleep 1
