@@ -20,13 +20,48 @@ Many 2.4GHz USB dongles stop working after suspend/resume due to driver unbindin
 
 This repo already includes the correct folder layout. Simply copy the files to your system and ensure they have executable permissions where needed.
 
+* `/userdata/dongle_2_4g/register_2.4ghz_dongle.sh`       ← Interactive dongle setup tool
 * `/usr/share/batocera/services/force_usb_wakeup_all`
 * `/userdata/system/configs/emulationstation/scripts/suspend/00-dongle-safe-suspend.sh`
 * `/userdata/system/configs/emulationstation/dongles.conf`
 * `/etc/udev/rules.d/30-wake-on-2dc8-3106-dongle-example-file.rules`
 
+### 🔌 `register_2.4ghz_dongle.sh`
 
-## 🛠️ Usage
+This interactive script helps you register a 2.4GHz gamepad dongle for suspend-safe wake-up support. It detects the dongle in both its **disconnected (idle)** and **connected (paired)** states, and automatically generates the necessary configuration and udev rule files.
+
+#### 🧰 What it does:
+1. Asks the user to unplug all 2.4GHz dongles.
+2. Prompts to connect only the dongle to register (direct USB port).
+3. Captures the dongle's USB info in idle state.
+4. Asks the user to pair the controller with the dongle.
+5. Captures the USB info again in connected state.
+6. Creates a structured JSON export with both states for reference.
+7. Appends a matching line to `dongles.conf` (with optional `:waitdock`).
+8. Generates a matching udev rule for proper wake-up behavior.
+9. Prevents duplicate entries and names all files consistently.
+
+#### 📦 Output:
+- JSON file: `./dongles/<vendor>_<product>_usb_2.4ghz_dongle_<timestamp>.json`
+- Config entry: added to:  
+  `/userdata/system/configs/dongles.conf`
+- Udev rule:  
+  `/etc/udev/rules.d/30-wake-on-<dongle-name>.rules`
+
+#### ▶️ How to use:
+1. Make the script executable:
+   ```bash
+   chmod +x /userdata/dongle_2_4g/register_2.4ghz_dongle.sh
+   ```
+
+2. Run it:
+   ```bash
+   /userdata/dongle_2_4g/./register_2.4ghz_dongle.sh
+   ```
+
+> 🛡️ This ensures that Batocera can safely suspend and resume **only when your gamepad is docked and ready**, preventing unwanted wake-ups from idle dongles or false signals.
+
+## 🛠️ Usage (Manual setup)
 
 1. **Copy all files** to their respective paths listed above.
 2. **Make sure the scripts and config are executable**:
