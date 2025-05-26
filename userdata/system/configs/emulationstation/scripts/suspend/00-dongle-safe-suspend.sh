@@ -3,7 +3,7 @@
 CONFIG="/userdata/system/configs/dongles.conf"
 DRIVER_PATH="/sys/bus/usb/drivers/usb"
 MATCHED_DEVICES=()
-TIMEOUT=15
+DEFAULT_TIMEOUT=15
 
 # Load known dongles
 if [[ ! -f "$CONFIG" ]]; then
@@ -20,16 +20,30 @@ mapfile -t known_entries < <(
 declare -A SERIAL_MATCHES
 declare -A GENERIC_MATCHES
 declare -A WAITDONGLE
+declare -A DONGLE_TIMEOUT
+declare -A IDLE_PID_LIST
 
+declare -A SERIAL_BY_KEY
+
+temp_serial=""
 for line in "${known_entries[@]}"; do
-    [[ "$line" =~ ^([a-f0-9]{4}):([a-f0-9]{4})(:([^:]+))?(:([a-z]+))?$ ]] || continue
-    vendor="${BASH_REMATCH[1]}"
-    product="${BASH_REMATCH[2]}"
-    serial="${BASH_REMATCH[4]}"
-    option="${BASH_REMATCH[6]}"
+    IFS=':' read -ra parts <<< "$line"
+    vendor="${parts[0]}"
+    product="${parts[1]}"
+    serial="${parts[2]}"
 
-    key="${vendor}:${product}"
-    [[ -n "$serial" ]] && key="$key:$serial"
+    key="$vendor:$product"
+    [[ -n "$serial" ]] && key+=":$serial" && SERIAL_BY_KEY["$key"]="$serial"
+
+    options=("${parts[@]:3}")
+    for opt in "${options[@]}"; do
+        [[ "$opt" == "waitdock" ]] && WAITDONGLE["$key"]=1
+        [[ "$opt" =~ ^timeout=([0-9]+)$ ]] && DONGLE_TIMEOUT["$key"]="${BASH_REMATCH[1]}"
+        [[ "$opt" =~ ^idle=([a-f0-9,]+)$ ]] && IDLE_PID_LIST["$key"]="${BASH_REMATCH[1]}"
+    done
+
+    [[ -z "${DONGLE_TIMEOUT[$key]}" ]] && DONGLE_TIMEOUT["$key"]="$DEFAULT_TIMEOUT"
+    [[ -z "${IDLE_PID_LIST[$key]}" ]] && IDLE_PID_LIST["$key"]="$product"
 
     if [[ -n "$serial" ]]; then
         SERIAL_MATCHES["$key"]=1
@@ -37,17 +51,16 @@ for line in "${known_entries[@]}"; do
         GENERIC_MATCHES["$vendor:$product"]=1
     fi
 
-    [[ "$option" == "waitdock" ]] && WAITDONGLE["$key"]=1
 done
 
 # Find matching USB devices
 for device in /sys/bus/usb/devices/*; do
     [[ -f "$device/idVendor" && -f "$device/idProduct" ]] || continue
 
-    vendor=$(cat "$device/idVendor" | tr '[:upper:]' '[:lower:]')
-    product=$(cat "$device/idProduct" | tr '[:upper:]' '[:lower:]')
+    vendor=$(<"$device/idVendor" tr '[:upper:]' '[:lower:]')
+    product=$(<"$device/idProduct" tr '[:upper:]' '[:lower:]')
     serial=""
-    [[ -f "$device/serial" ]] && serial=$(cat "$device/serial" | tr '[:upper:]' '[:lower:]')
+    [[ -f "$device/serial" ]] && serial=$(<"$device/serial" tr '[:upper:]' '[:lower:]')
 
     key_exact="$vendor:$product:$serial"
     key_generic="$vendor:$product"
@@ -59,6 +72,7 @@ for device in /sys/bus/usb/devices/*; do
         echo "[DongleSuspend] Fallback match: $key_generic (serial: $serial)"
         MATCHED_DEVICES+=("$(basename "$device")|$key_generic")
     fi
+
 done
 
 if [[ ${#MATCHED_DEVICES[@]} -eq 0 ]]; then
@@ -66,31 +80,42 @@ if [[ ${#MATCHED_DEVICES[@]} -eq 0 ]]; then
     exit 0
 fi
 
-# Unbind matched devices
+# Unbind matched devices and wait for re-enumeration
 for entry in "${MATCHED_DEVICES[@]}"; do
     IFS="|" read -r DONGLE DEVKEY <<< "$entry"
     echo "[DongleSuspend] Unbinding $DONGLE..."
     [[ -e "$DRIVER_PATH/$DONGLE" ]] && echo "$DONGLE" > "$DRIVER_PATH/unbind"
-done
 
-# Wait for :waitdock if configured
-for entry in "${MATCHED_DEVICES[@]}"; do
-    IFS="|" read -r DONGLE DEVKEY <<< "$entry"
+    sleep 1  # allow kernel to process
+
     [[ -z "${WAITDONGLE[$DEVKEY]}" ]] && continue
 
-    # Record idle state PID at time of suspend check
-    idle_pid=$(cat "/sys/bus/usb/devices/$DONGLE/idProduct" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    timeout="${DONGLE_TIMEOUT[$DEVKEY]:-$DEFAULT_TIMEOUT}"
+    IFS=',' read -ra idle_pids <<< "${IDLE_PID_LIST[$DEVKEY]}"
+    vendor="${DEVKEY%%:*}"
+    pid="${DEVKEY#*:}"
+    pid="${pid%%:*}"
+    serial="${SERIAL_BY_KEY[$DEVKEY]}"
 
-    echo "[DongleSuspend] Waiting for $DONGLE to return to docked state (ID ${idle_pid})..."
-    timeout=$TIMEOUT
+    echo "[DongleSuspend] Waiting for dongle reattach (Vendor: $vendor, Idle PIDs: ${IDLE_PID_LIST[$DEVKEY]}, Serial: $serial, Timeout: ${timeout}s)..."
+
     while [[ $timeout -gt 0 ]]; do
-        current_product=$(cat "/sys/bus/usb/devices/$DONGLE/idProduct" 2>/dev/null | tr '[:upper:]' '[:lower:]')
-        if [[ "$current_product" == "$idle_pid" ]]; then
-            echo "[DongleSuspend] Docked state confirmed (${idle_pid})"
-            echo "[DongleSuspend] Waiting 1 second to ensure wakeup rules apply..."
-            sleep 1
-            break
-        fi
+        for device in /sys/bus/usb/devices/*; do
+            [[ -f "$device/idVendor" && -f "$device/idProduct" ]] || continue
+            dev_vendor=$(<"$device/idVendor" tr '[:upper:]' '[:lower:]')
+            dev_product=$(<"$device/idProduct" tr '[:upper:]' '[:lower:]')
+            dev_serial=""
+            [[ -f "$device/serial" ]] && dev_serial=$(<"$device/serial" tr '[:upper:]' '[:lower:]')
+
+            for idle_pid in "${idle_pids[@]}"; do
+                if [[ "$dev_vendor" == "$vendor" && "$dev_product" == "$idle_pid" && "$dev_serial" == "$serial" ]]; then
+                    echo "[DongleSuspend] Docked state confirmed on new device ($(basename "$device"), Product ID: $idle_pid)"
+                    echo "[DongleSuspend] Waiting 1 second to ensure wakeup rules apply..."
+                    sleep 1
+                    break 3
+                fi
+            done
+        done
         sleep 1
         ((timeout--))
     done
@@ -99,6 +124,7 @@ for entry in "${MATCHED_DEVICES[@]}"; do
         echo "[DongleSuspend] Timeout waiting for dock. Suspend canceled."
         exit 0
     fi
+
 done
 
 # Rebind if not already bound
