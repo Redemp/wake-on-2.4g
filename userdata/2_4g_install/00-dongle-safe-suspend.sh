@@ -13,7 +13,7 @@ fi
 
 # Strip comments, trim whitespace, lowercase
 mapfile -t known_entries < <(
-    grep -vE '^\s*#' "$CONFIG" | sed 's/#.*//' | tr -d ' \t' | tr '[:upper:]' '[:lower:]'
+    grep -vE '^[ \t]*#' "$CONFIG" | sed 's/#.*//' | tr -d ' \t' | tr '[:upper:]' '[:lower:]'
 )
 
 # Parse config into match tables
@@ -111,6 +111,13 @@ for entry in "${MATCHED_DEVICES[@]}"; do
                 if [[ "$dev_vendor" == "$vendor" && "$dev_product" == "$idle_pid" && "$dev_serial" == "$serial" ]]; then
                     echo "[DongleSuspend] Docked state confirmed on new device ($(basename "$device"), Product ID: $idle_pid)"
                     echo "[DongleSuspend] Waiting 1 second to ensure wakeup rules apply..."
+
+                    # ✅ Re-enable wakeup on re-detected device if supported
+                    if [[ -f "$device/power/wakeup" ]]; then
+                        echo enabled > "$device/power/wakeup"
+                        echo "[DongleSuspend] Wakeup re-enabled for $(basename "$device")"
+                    fi
+
                     sleep 1
                     break 3
                 fi
@@ -136,6 +143,7 @@ for entry in "${MATCHED_DEVICES[@]}"; do
     else
         echo "[DongleSuspend] Already bound or busy: $DONGLE"
     fi
+
 done
 
 echo "[DongleSuspend] Ready for suspend. External suspend call may now proceed."
