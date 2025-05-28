@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 CONFIG_FILE="/userdata/system/configs/dongles.conf"
@@ -9,6 +8,10 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
+# Ensure config file exists
+mkdir -p "$(dirname "$CONFIG_FILE")"
+[[ -f "$CONFIG_FILE" ]] || touch "$CONFIG_FILE"
 
 read_field() { cat "$1" 2>/dev/null || echo "unknown"; }
 get_wakeup_state() { [[ -f "$1/power/wakeup" ]] && cat "$1/power/wakeup" || echo "unsupported"; }
@@ -107,10 +110,12 @@ else
     TIMEOUT_VALUE="$DEFAULT_TIMEOUT"
 fi
 
-conf_line="${vendor_c}:${product_c}:${serial_c}:waitdock:idle=${product_d}:timeout=${TIMEOUT_VALUE}"
+conf_serial=""
+[[ "$serial_c" != "unknown" && "$serial_d" != "unknown" && -n "$serial_c" && -n "$serial_d" ]] && conf_serial=":$serial_c"
+conf_line="${vendor_c}:${product_c}${conf_serial}:waitdock:idle=${product_d}:timeout=${TIMEOUT_VALUE}"
 block="# DEVICE\n${conf_line}    # ${base_name}\n# DEVICE"
 
-grep -qi "^${vendor_c}:${product_c}:${serial_c}" "$CONFIG_FILE" 2>/dev/null || {
+grep -qi "^${vendor_c}:${product_c}" "$CONFIG_FILE" 2>/dev/null || {
     awk 'NF' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
     echo -e "$block" >> "$CONFIG_FILE"
 }

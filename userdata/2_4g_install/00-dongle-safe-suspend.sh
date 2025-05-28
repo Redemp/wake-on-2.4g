@@ -1,5 +1,7 @@
 #!/bin/bash
 
+exec > >(tee -a "/userdata/system/logs/dongle_suspend.log") 2>&1
+
 CONFIG="/userdata/system/configs/dongles.conf"
 DRIVER_PATH="/sys/bus/usb/drivers/usb"
 LOGFILE="/userdata/system/logs/dongle_suspend.log"
@@ -9,10 +11,17 @@ rotate_log() {
     [[ -f "$LOGFILE" && $(stat -c%s "$LOGFILE") -gt $MAX_LOG_SIZE ]] && mv "$LOGFILE" "$LOGFILE.old"
 }
 
+cleanup() {
+    local status=$?
+    [[ $status -ne 0 ]] && echo "[ERROR] Script exited unexpectedly (status: $status)"
+    echo "[EXIT] Script ended."
+}
+trap cleanup EXIT INT TERM
+
 log() {
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] $*" | tee -a "$LOGFILE"
+    echo "[$timestamp] $*"
 }
 
 log_cmd_output() {
@@ -27,7 +36,6 @@ log "== Dongle Suspend Script Started =="
 
 [[ ! -f "$CONFIG" ]] && log "[ERROR] No config file found at $CONFIG" && exit 1
 
-# Parse config
 mapfile -t known_entries < <(
     grep -vE '^[ \t]*#' "$CONFIG" | sed 's/#.*//' | sed 's/[ \t]*$//' | tr '[:upper:]' '[:lower:]'
 )
@@ -54,7 +62,6 @@ for line in "${known_entries[@]}"; do
     [[ -n "$serial" ]] && SERIAL_MATCHES["$key"]=1 || GENERIC_MATCHES["$vendor:$product"]=1
 done
 
-# Find matches
 for device in /sys/bus/usb/devices/*; do
     [[ -f "$device/idVendor" && -f "$device/idProduct" ]] || continue
     vendor=$(<"$device/idVendor" tr '[:upper:]' '[:lower:]')
@@ -74,14 +81,13 @@ done
 
 [[ ${#MATCHED_DEVICES[@]} -eq 0 ]] && log "[INFO] No matching 2.4G dongles found" && exit 0
 
-# Unbind and wait for reattach
 for entry in "${MATCHED_DEVICES[@]}"; do
     IFS="|" read -r DONGLE DEVKEY <<< "$entry"
     log "[UNBIND] $DONGLE"
     [[ -e "$DRIVER_PATH/$DONGLE" ]] && echo "$DONGLE" > "$DRIVER_PATH/unbind"
     sleep 1
 
-    log_cmd_output "udevadm info before waitdock:" udevadm info --name="/dev/bus/usb/${DONGLE//-/\/}" --attribute-walk
+    log_cmd_output "udevadm info before waitdock:" udevadm info --name="/dev/bus/usb/${DONGLE//-//}" --attribute-walk
 
     [[ -z "${WAITDONGLE[$DEVKEY]}" ]] && continue
     timeout="${DONGLE_TIMEOUT[$DEVKEY]:-$DEFAULT_TIMEOUT}"
@@ -99,7 +105,7 @@ for entry in "${MATCHED_DEVICES[@]}"; do
             [[ -f "$device/serial" ]] && dev_serial=$(<"$device/serial" tr '[:upper:]' '[:lower:]')
 
             for idle_pid in "${idle_pids[@]}"; do
-                if [[ "$dev_vendor" == "$vendor" && "$dev_product" == "$idle_pid" && "$dev_serial" == "$serial" ]]; then
+                if [[ "$dev_vendor" == "$vendor" && "$dev_product" == "$idle_pid" && ( -z "$serial" || "$dev_serial" == "$serial" ) ]]; then
                     base=$(basename "$device")
                     log "[DOCKED] Detected $base (Product ID: $idle_pid)"
 
@@ -108,7 +114,7 @@ for entry in "${MATCHED_DEVICES[@]}"; do
                         echo enabled > "$device/power/wakeup" && \
                         log "[WAKEUP] enabled for $base"
 
-                    log_cmd_output "udevadm info for $base:" udevadm info --name="/dev/bus/usb/${base//-/\/}" --attribute-walk
+                    log_cmd_output "udevadm info for $base:" udevadm info --name="/dev/bus/usb/${base//-//}" --attribute-walk
 
                     sleep 1
                     break 3
@@ -120,7 +126,6 @@ for entry in "${MATCHED_DEVICES[@]}"; do
     done
 done
 
-# Rebind
 for entry in "${MATCHED_DEVICES[@]}"; do
     IFS="|" read -r DONGLE _ <<< "$entry"
     log "[REBIND] $DONGLE"
