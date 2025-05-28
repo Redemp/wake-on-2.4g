@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 CONFIG_FILE="/userdata/system/configs/dongles.conf"
@@ -70,7 +71,7 @@ wakeup_c=$(get_wakeup_state "$dongle_path")
 
 safe_manufacturer=$(echo "$manufacturer" | tr -cd '[:alnum:]' | sed 's/ /_/g')
 timestamp=$(date +"%Y%m%d_%H%M%S")
-base_name="${safe_manufacturer}_${vendor_d}_${product_d}_usb_2.4ghz_dongle"
+base_name="${safe_manufacturer}_${vendor_d}_${product_d}_${serial_c}_usb_2.4ghz_dongle"
 export_dir="./dongles"
 mkdir -p "$export_dir"
 export_file="${export_dir}/${base_name}_${timestamp}.json"
@@ -80,26 +81,25 @@ while [[ -e "$export_file" ]]; do
     ((counter++))
 done
 
-jq -n     --arg path "$dongle_path"     --arg vendor_d "$vendor_d" --arg product_d "$product_d" --arg manufacturer "$manufacturer"     --arg product_name_d "$product_name_d" --arg serial_d "$serial_d"     --arg class_d "$class_d" --arg subclass_d "$subclass_d" --arg protocol_d "$protocol_d" --arg wakeup_d "$wakeup_d"     --arg vendor_c "$vendor_c" --arg product_c "$product_c" --arg product_name_c "$product_name_c"     --arg serial_c "$serial_c" --arg class_c "$class_c" --arg subclass_c "$subclass_c" --arg protocol_c "$protocol_c" --arg wakeup_c "$wakeup_c"     '{
-        disconnected: {
-            path: $path,
-            vendor_id: $vendor_d, product_id: $product_d,
-            manufacturer: $manufacturer, product_name: $product_name_d, serial: $serial_d,
-            device_class: $class_d, device_subclass: $subclass_d, device_protocol: $protocol_d,
-            wakeup_support: $wakeup_d
-        },
-        connected: {
-            path: $path,
-            vendor_id: $vendor_c, product_id: $product_c,
-            manufacturer: $manufacturer, product_name: $product_name_c, serial: $serial_c,
-            device_class: $class_c, device_subclass: $subclass_c, device_protocol: $protocol_c,
-            wakeup_support: $wakeup_c
-        }
-    }' > "$export_file"
+jq -n --arg path "$dongle_path" --arg vendor_d "$vendor_d" --arg product_d "$product_d" --arg manufacturer "$manufacturer" --arg product_name_d "$product_name_d" --arg serial_d "$serial_d" --arg class_d "$class_d" --arg subclass_d "$subclass_d" --arg protocol_d "$protocol_d" --arg wakeup_d "$wakeup_d" --arg vendor_c "$vendor_c" --arg product_c "$product_c" --arg product_name_c "$product_name_c" --arg serial_c "$serial_c" --arg class_c "$class_c" --arg subclass_c "$subclass_c" --arg protocol_c "$protocol_c" --arg wakeup_c "$wakeup_c" '{
+    disconnected: {
+        path: $path,
+        vendor_id: $vendor_d, product_id: $product_d,
+        manufacturer: $manufacturer, product_name: $product_name_d, serial: $serial_d,
+        device_class: $class_d, device_subclass: $subclass_d, device_protocol: $protocol_d,
+        wakeup_support: $wakeup_d
+    },
+    connected: {
+        path: $path,
+        vendor_id: $vendor_c, product_id: $product_c,
+        manufacturer: $manufacturer, product_name: $product_name_c, serial: $serial_c,
+        device_class: $class_c, device_subclass: $subclass_c, device_protocol: $protocol_c,
+        wakeup_support: $wakeup_c
+    }
+}' > "$export_file"
 
 echo -e "\n${GREEN}✅ JSON export complete: ${export_file}${NC}"
 
-# Prompt for custom timeout
 read -rp "Default suspend wait timeout is ${DEFAULT_TIMEOUT} seconds. Enter custom timeout (or press Enter to use default): " custom_timeout
 if [[ -n "$custom_timeout" && "$custom_timeout" =~ ^[0-9]+$ ]]; then
     TIMEOUT_VALUE="$custom_timeout"
@@ -108,15 +108,12 @@ else
 fi
 
 conf_line="${vendor_c}:${product_c}:${serial_c}:waitdock:idle=${product_d}:timeout=${TIMEOUT_VALUE}"
-last_updated="# updated: $(date +"%Y-%m-%d %H:%M")"
+block="# DEVICE\n${conf_line}    # ${base_name}\n# DEVICE"
 
-block="\n# DEVICE: ${product_name_c}\n# ${last_updated}\n${conf_line}    # ${base_name}\n# ${vendor_c}:${product_c}                                  # fallback match"
-
-grep -qi "^${vendor_c}:${product_c}:${serial_c}" "$CONFIG_FILE" 2>/dev/null || echo -e "$block" >> "$CONFIG_FILE"
-
-awk '!x[$0]++' "$CONFIG_FILE" | awk 'BEGIN{RS="\n# DEVICE"; ORS="\n# DEVICE"} {print | "sort"}' | sed '1s/^# DEVICE//' > "$CONFIG_FILE.sorted"
-mv "$CONFIG_FILE.sorted" "$CONFIG_FILE"
-echo -e "${GREEN}Appended to dongles.conf:${NC} $conf_line"
+grep -qi "^${vendor_c}:${product_c}:${serial_c}" "$CONFIG_FILE" 2>/dev/null || {
+    awk 'NF' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+    echo -e "$block" >> "$CONFIG_FILE"
+}
 
 udev_file="$UDEV_DIR/30-wake-on-${base_name}.rules"
 if [[ -e "$udev_file" ]]; then
@@ -131,18 +128,16 @@ ACTION=="add|change", SUBSYSTEMS=="usb", ATTRS{idVendor}=="${vendor_c}", ATTRS{i
 # Disable wakeup when dongle switches to IDLE
 ACTION=="add|change", SUBSYSTEMS=="usb", ATTRS{idVendor}=="${vendor_d}", ATTRS{idProduct}=="${product_d}", TEST=="power/wakeup", RUN+="/bin/sh -c 'echo disabled > /sys/\$env{DEVPATH}/power/wakeup'"
 EOF
-
     echo -e "${GREEN}Created udev rule: $udev_file${NC}"
 fi
 
-### === Batocera-specific === ###
 echo -e "${GREEN}Reloading udev rules and applying changes...${NC}"
 udevadm control --reload-rules
 udevadm trigger
 
-echo -e "${GREEN}Enabling and starting service: force_usb_wakeup_all${NC}"
-batocera-services enable force_usb_wakeup_all
-batocera-services start force_usb_wakeup_all
+echo -e "${GREEN}Enabling and starting service: force_usb_wakeup_dongles${NC}"
+batocera-services enable force_usb_wakeup_dongles
+batocera-services start force_usb_wakeup_dongles
 
 read -rp "Would you like to save the overlay now to make changes permanent? [y/N]: " persist
 if [[ "${persist,,}" == "y" ]]; then
@@ -151,7 +146,6 @@ if [[ "${persist,,}" == "y" ]]; then
 else
     echo -e "${YELLOW}⚠️  You must run batocera-save-overlay manually or your changes will be lost after reboot!${NC}"
 fi
-### === End Batocera-specific === ###
 
 echo
 read -rp "Press 'y' to exit: " choice
