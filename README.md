@@ -4,7 +4,7 @@ A Bash script to safely suspend and resume Linux systems (such as Batocera) whil
 
 ## 🎯 Purpose
 
-Many 2.4GHz USB dongles stop working after suspend/resume due to driver unbinding or improper wakeup settings. This script safely unbinds and rebinds only *known* devices during suspend and resume to prevent disconnection issues or missed input. It also enables USB wakeup support on all connected USB devices to improve compatibility with devices that do **not** natively support wake on USB.
+Many 2.4GHz USB dongles stop working after suspend/resume due to driver unbinding or improper wakeup settings. This script safely unbinds and rebinds only *known* devices during suspend and resume to prevent disconnection issues or missed input. It also enables USB wakeup support (`power/wakeup`) **only** for devices listed in the `dongles.conf` configuration file, improving compatibility with dongles that do **not** natively support USB wake functionality.
 
 ## ✅ Features
 
