@@ -21,10 +21,9 @@ Many 2.4GHz USB dongles stop working after suspend/resume due to driver unbindin
 This repo already includes the correct folder layout. Simply copy the files to your system and ensure they have executable permissions where needed.
 
 * `/userdata/dongle_2_4g/register_2.4ghz_dongle.sh`       ← Interactive dongle setup tool
-* `/usr/share/batocera/services/force_usb_wakeup_all`
+* `/usr/share/batocera/services/force_usb_wakeup`
 * `/userdata/system/configs/emulationstation/scripts/suspend/00-dongle-safe-suspend.sh`
 * `/userdata/system/configs/emulationstation/dongles.conf`
-* `/etc/udev/rules.d/30-wake-on-2dc8-3106-dongle-example-file.rules`
 
 ### 🔌 `register_2.4ghz_dongle.sh`
 
@@ -66,7 +65,7 @@ This interactive script helps you register a 2.4GHz gamepad dongle for suspend-s
 1. **Copy all files** to their respective paths listed above.
 2. **Make sure the scripts and config are executable**:
    ```bash
-   chmod +x /usr/share/batocera/services/force_usb_wakeup_all
+   chmod +x /usr/share/batocera/services/force_usb_wakeup
    chmod +x /userdata/system/configs/emulationstation/scripts/suspend/00-dongle-safe-suspend.sh
    chmod +x /userdata/system/configs/emulationstation/dongles.conf
 
