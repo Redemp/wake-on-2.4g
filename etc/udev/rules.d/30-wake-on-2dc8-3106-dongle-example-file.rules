@@ -1,5 +1,0 @@
-# Enable wakeup when controller is active
-ACTION=="add|change", SUBSYSTEMS=="usb", ATTRS{idVendor}=="2dc8", ATTRS{idProduct}=="3106", TEST=="power/wakeup", RUN+="/bin/sh -c 'echo enabled > /sys/$env{DEVPATH}/power/wakeup'"
-
-# Disable wakeup when dongle switches to IDLE
-ACTION=="add|change", SUBSYSTEMS=="usb", ATTRS{idVendor}=="2dc8", ATTRS{idProduct}=="3109", TEST=="power/wakeup", RUN+="/bin/sh -c 'echo disabled > /sys/$env{DEVPATH}/power/wakeup'"
