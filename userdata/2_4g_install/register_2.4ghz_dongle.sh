@@ -7,7 +7,7 @@ DEFAULT_TIMEOUT=15
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
 # Ensure config file exists
 mkdir -p "$(dirname "$CONFIG_FILE")"
@@ -37,12 +37,10 @@ lsusb | awk '{ print tolower($6) }' | sort > "$before"
 echo -e "${GREEN}[Step 2] Plug in your 2.4GHz dongle (not via hub).${NC}"
 read -rp "Press Enter after connecting..."
 sleep 2
-
 after=$(mktemp)
 lsusb | awk '{ print tolower($6) }' | sort > "$after"
 new_id=$(comm -13 "$before" "$after" | head -n 1)
 rm "$before" "$after"
-
 [[ -z "$new_id" ]] && { echo -e "${RED}No new device detected. Exiting.${NC}"; exit 1; }
 
 dongle_path=$(get_usb_path_by_id "$new_id")
@@ -50,7 +48,7 @@ dongle_path=$(get_usb_path_by_id "$new_id")
 
 vendor_d=$(read_field "$dongle_path/idVendor")
 product_d=$(read_field "$dongle_path/idProduct")
-manufacturer=$(read_field "$dongle_path/manufacturer")
+manufacturer_d=$(read_field "$dongle_path/manufacturer")
 product_name_d=$(read_field "$dongle_path/product")
 serial_d=$(read_field "$dongle_path/serial")
 class_d=$(read_field "$dongle_path/bDeviceClass")
@@ -65,6 +63,7 @@ sleep 2
 
 vendor_c=$(read_field "$dongle_path/idVendor")
 product_c=$(read_field "$dongle_path/idProduct")
+manufacturer_c=$(read_field "$dongle_path/manufacturer")
 product_name_c=$(read_field "$dongle_path/product")
 serial_c=$(read_field "$dongle_path/serial")
 class_c=$(read_field "$dongle_path/bDeviceClass")
@@ -72,7 +71,7 @@ subclass_c=$(read_field "$dongle_path/bDeviceSubClass")
 protocol_c=$(read_field "$dongle_path/bDeviceProtocol")
 wakeup_c=$(get_wakeup_state "$dongle_path")
 
-safe_manufacturer=$(echo "$manufacturer" | tr -cd '[:alnum:]' | sed 's/ /_/g')
+safe_manufacturer=$(echo "$manufacturer_c" | tr -cd '[:alnum:]' | sed 's/ /_/g')
 timestamp=$(date +"%Y%m%d_%H%M%S")
 base_name="${safe_manufacturer}_${vendor_d}_${product_d}_${serial_c}_usb_2.4ghz_dongle"
 export_dir="./dongles"
@@ -84,7 +83,7 @@ while [[ -e "$export_file" ]]; do
     ((counter++))
 done
 
-jq -n --arg path "$dongle_path" --arg vendor_d "$vendor_d" --arg product_d "$product_d" --arg manufacturer "$manufacturer" --arg product_name_d "$product_name_d" --arg serial_d "$serial_d" --arg class_d "$class_d" --arg subclass_d "$subclass_d" --arg protocol_d "$protocol_d" --arg wakeup_d "$wakeup_d" --arg vendor_c "$vendor_c" --arg product_c "$product_c" --arg product_name_c "$product_name_c" --arg serial_c "$serial_c" --arg class_c "$class_c" --arg subclass_c "$subclass_c" --arg protocol_c "$protocol_c" --arg wakeup_c "$wakeup_c" '{
+jq -n --arg path "$dongle_path" --arg vendor_d "$vendor_d" --arg product_d "$product_d" --arg manufacturer "$manufacturer_c" --arg product_name_d "$product_name_d" --arg serial_d "$serial_d" --arg class_d "$class_d" --arg subclass_d "$subclass_d" --arg protocol_d "$protocol_d" --arg wakeup_d "$wakeup_d" --arg vendor_c "$vendor_c" --arg product_c "$product_c" --arg product_name_c "$product_name_c" --arg serial_c "$serial_c" --arg class_c "$class_c" --arg subclass_c "$subclass_c" --arg protocol_c "$protocol_c" --arg wakeup_c "$wakeup_c" '{
     disconnected: {
         path: $path,
         vendor_id: $vendor_d, product_id: $product_d,
@@ -112,31 +111,44 @@ fi
 
 conf_serial=""
 [[ "$serial_c" != "unknown" && "$serial_d" != "unknown" && -n "$serial_c" && -n "$serial_d" ]] && conf_serial=":$serial_c"
-conf_line="${vendor_c}:${product_c}${conf_serial}:waitdock:idle=${product_d}:timeout=${TIMEOUT_VALUE}"
-block="# DEVICE\n${conf_line}    # ${base_name}\n# DEVICE"
 
-grep -qi "^${vendor_c}:${product_c}" "$CONFIG_FILE" 2>/dev/null || {
-    awk 'NF' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-    echo -e "$block" >> "$CONFIG_FILE"
-}
+# Combine product names if different
+if [[ "$product_name_c" != "$product_name_d" && "$product_name_d" != "unknown" ]]; then
+    product_name_full="${product_name_c}, ${product_name_d}"
+else
+    product_name_full="${product_name_c}"
+fi
+
+# Combine manufacturers if different
+if [[ "$manufacturer_c" != "$manufacturer_d" && "$manufacturer_d" != "unknown" ]]; then
+    manufacturer_full="${manufacturer_c}, ${manufacturer_d}"
+else
+    manufacturer_full="${manufacturer_c}"
+fi
+
+conf_line="${vendor_c}:${product_c}${conf_serial}:waitdock:idle=${product_d}:timeout=${TIMEOUT_VALUE}"
+{
+    echo "# Manufacturer : $manufacturer_full"
+    echo "# Product Name : $product_name_full"
+    echo "$conf_line"
+} >> "$CONFIG_FILE"
+
+echo -e "${GREEN}Entry added to $CONFIG_FILE:${NC}"
+echo "# Manufacturer : $manufacturer_full"
+echo "# Product Name : $product_name_full"
+echo "$conf_line"
 
 udev_file="$UDEV_DIR/30-wake-on-${base_name}.rules"
-if [[ -e "$udev_file" ]]; then
-    echo -e "${YELLOW}Udev rule already exists: $udev_file${NC}"
-else
+if [[ ! -e "$udev_file" ]]; then
     cat <<EOF > "$udev_file"
 # $base_name
 
-# Enable wakeup when controller is active
 ACTION=="add|change", SUBSYSTEMS=="usb", ATTRS{idVendor}=="${vendor_c}", ATTRS{idProduct}=="${product_c}", TEST=="power/wakeup", RUN+="/bin/sh -c 'echo enabled > /sys/\$env{DEVPATH}/power/wakeup'"
-
-# Disable wakeup when dongle switches to IDLE
 ACTION=="add|change", SUBSYSTEMS=="usb", ATTRS{idVendor}=="${vendor_d}", ATTRS{idProduct}=="${product_d}", TEST=="power/wakeup", RUN+="/bin/sh -c 'echo disabled > /sys/\$env{DEVPATH}/power/wakeup'"
 EOF
     echo -e "${GREEN}Created udev rule: $udev_file${NC}"
 fi
 
-echo -e "${GREEN}Reloading udev rules and applying changes...${NC}"
 udevadm control --reload-rules
 udevadm trigger
 

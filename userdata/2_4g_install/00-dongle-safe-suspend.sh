@@ -1,140 +1,99 @@
 #!/bin/bash
+# 00-dongle-safe-suspend_v24-final.sh
+# Prevents system suspend when a 2.4GHz gamepad dongle is still connected and active
+# Supports `waitdock` to block suspend and `timeout=N` to delay suspend for disconnection
+# Designed for Batocera or similar Linux systems
 
-exec > >(tee -a "/userdata/system/logs/dongle_suspend.log") 2>&1
+# === CONFIGURATION SWITCHES ===
+ALLOW_SUSPEND_IF_NO_MATCH=false  # If no devices in config match, allow suspend?
 
 CONFIG="/userdata/system/configs/dongles.conf"
 DRIVER_PATH="/sys/bus/usb/drivers/usb"
 LOGFILE="/userdata/system/logs/dongle_suspend.log"
-MAX_LOG_SIZE=102400  # 100KB
+MAX_LOG_SIZE=102400  # Rotate log if over 100KB
+
+# === FUNCTIONS ===
 
 rotate_log() {
-    [[ -f "$LOGFILE" && $(stat -c%s "$LOGFILE") -gt $MAX_LOG_SIZE ]] && mv "$LOGFILE" "$LOGFILE.old"
+    if [[ -f "$LOGFILE" ]]; then
+        local size
+        size=$(stat -c %s "$LOGFILE")
+        if (( size > MAX_LOG_SIZE )); then
+            mv "$LOGFILE" "$LOGFILE.old"
+            echo "[LOG] Log rotated due to size > ${MAX_LOG_SIZE} bytes" > "$LOGFILE"
+        fi
+    fi
 }
-
-cleanup() {
-    local status=$?
-    [[ $status -ne 0 ]] && echo "[ERROR] Script exited unexpectedly (status: $status)"
-    echo "[EXIT] Script ended."
-}
-trap cleanup EXIT INT TERM
 
 log() {
-    local timestamp
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] $*"
+    echo "[{ $(date '+%F %T') }] $*"
 }
 
-log_cmd_output() {
-    local header="$1"
-    shift
-    log "$header"
-    "$@" 2>&1 | while IFS= read -r line; do log "  $line"; done
+is_controller_connected() {
+    local vendor="$1"
+    local product="$2"
+    for dev in /sys/bus/usb/devices/*; do
+        [[ -f "$dev/idVendor" && -f "$dev/idProduct" ]] || continue
+        local v=$(<"$dev/idVendor" tr '[:upper:]' '[:lower:]')
+        local p=$(<"$dev/idProduct" tr '[:upper:]' '[:lower:]')
+        if [[ "$v" == "$vendor" && "$p" == "$product" ]]; then
+            log "[ACTIVE CHECK] Controller is still connected (vendor=$vendor, product=$product)"
+            return 0
+        fi
+    done
+    return 1
 }
+
+# === MAIN LOGIC ===
 
 rotate_log
-log "== Dongle Suspend Script Started =="
+exec > >(tee -a "$LOGFILE") 2>&1
 
-[[ ! -f "$CONFIG" ]] && log "[ERROR] No config file found at $CONFIG" && exit 1
+matched_any=false
 
-mapfile -t known_entries < <(
-    grep -vE '^[ \t]*#' "$CONFIG" | sed 's/#.*//' | sed 's/[ \t]*$//' | tr '[:upper:]' '[:lower:]'
-)
+while IFS= read -r line; do
+    line="${line%%#*}"                       # Remove comments
+    line=$(echo "$line" | tr -d ' \t\n\r')  # Strip whitespace
+    [[ -z "$line" ]] && continue            # Skip empty lines
 
-declare -A SERIAL_MATCHES GENERIC_MATCHES WAITDONGLE DONGLE_TIMEOUT IDLE_PID_LIST SERIAL_BY_KEY
-MATCHED_DEVICES=()
-DEFAULT_TIMEOUT=15
+    IFS=':' read -r vendor product serial_opt flags <<< "$line"
+    [[ -z "$vendor" || -z "$product" ]] && continue
 
-for line in "${known_entries[@]}"; do
-    IFS=':' read -ra parts <<< "$line"
-    vendor="${parts[0]}" product="${parts[1]}" serial="${parts[2]}"
-    key="$vendor:$product"
-    [[ -n "$serial" ]] && key+=":$serial" && SERIAL_BY_KEY["$key"]="$serial"
+    serial="${serial_opt:-unknown}"
+    controller_block_suspend=false
+    timeout_secs=0
 
-    options=("${parts[@]:3}")
-    for opt in "${options[@]}"; do
-        [[ "$opt" == "waitdock" ]] && WAITDONGLE["$key"]=1
-        [[ "$opt" =~ ^timeout=([0-9]+)$ ]] && DONGLE_TIMEOUT["$key"]="${BASH_REMATCH[1]}"
-        [[ "$opt" =~ ^idle=([a-f0-9,]+)$ ]] && IDLE_PID_LIST["$key"]="${BASH_REMATCH[1]}"
+    IFS=':' read -ra flag_array <<< "$flags"
+    for flag in "${flag_array[@]}"; do
+        [[ "$flag" == waitdock* ]] && controller_block_suspend=true
+        [[ "$flag" == timeout=* ]] && timeout_secs="${flag#timeout=}"
     done
 
-    [[ -z "${DONGLE_TIMEOUT[$key]}" ]] && DONGLE_TIMEOUT["$key"]="$DEFAULT_TIMEOUT"
-    [[ -z "${IDLE_PID_LIST[$key]}" ]] && IDLE_PID_LIST["$key"]="$product"
-    [[ -n "$serial" ]] && SERIAL_MATCHES["$key"]=1 || GENERIC_MATCHES["$vendor:$product"]=1
-done
+    matched_any=true
 
-for device in /sys/bus/usb/devices/*; do
-    [[ -f "$device/idVendor" && -f "$device/idProduct" ]] || continue
-    vendor=$(<"$device/idVendor" tr '[:upper:]' '[:lower:]')
-    product=$(<"$device/idProduct" tr '[:upper:]' '[:lower:]')
-    serial=""
-    [[ -f "$device/serial" ]] && serial=$(<"$device/serial" tr '[:upper:]' '[:lower:]')
-    key_exact="$vendor:$product:$serial" key_generic="$vendor:$product"
+    if $controller_block_suspend; then
+        if is_controller_connected "$vendor" "$product"; then
+            log "[SUSPEND] Controller is connected. Waiting up to ${timeout_secs}s for it to disconnect..."
 
-    if [[ -n "${SERIAL_MATCHES[$key_exact]}" ]]; then
-        log "[MATCH] Exact: $key_exact"
-        MATCHED_DEVICES+=("$(basename "$device")|$key_exact")
-    elif [[ -n "${GENERIC_MATCHES[$key_generic]}" ]]; then
-        log "[MATCH] Fallback: $key_generic (serial: $serial)"
-        MATCHED_DEVICES+=("$(basename "$device")|$key_generic")
-    fi
-done
-
-[[ ${#MATCHED_DEVICES[@]} -eq 0 ]] && log "[INFO] No matching 2.4G dongles found" && exit 0
-
-for entry in "${MATCHED_DEVICES[@]}"; do
-    IFS="|" read -r DONGLE DEVKEY <<< "$entry"
-    log "[UNBIND] $DONGLE"
-    [[ -e "$DRIVER_PATH/$DONGLE" ]] && echo "$DONGLE" > "$DRIVER_PATH/unbind"
-    sleep 1
-
-    log_cmd_output "udevadm info before waitdock:" udevadm info --name="/dev/bus/usb/${DONGLE//-//}" --attribute-walk
-
-    [[ -z "${WAITDONGLE[$DEVKEY]}" ]] && continue
-    timeout="${DONGLE_TIMEOUT[$DEVKEY]:-$DEFAULT_TIMEOUT}"
-    IFS=',' read -ra idle_pids <<< "${IDLE_PID_LIST[$DEVKEY]}"
-    vendor="${DEVKEY%%:*}" pid="${DEVKEY#*:}" pid="${pid%%:*}" serial="${SERIAL_BY_KEY[$DEVKEY]}"
-
-    log "[WAITDOCK] Vendor: $vendor, Idle PIDs: ${IDLE_PID_LIST[$DEVKEY]}, Serial: $serial, Timeout: ${timeout}s"
-
-    while [[ $timeout -gt 0 ]]; do
-        for device in /sys/bus/usb/devices/*; do
-            [[ -f "$device/idVendor" && -f "$device/idProduct" ]] || continue
-            dev_vendor=$(<"$device/idVendor" tr '[:upper:]' '[:lower:]')
-            dev_product=$(<"$device/idProduct" tr '[:upper:]' '[:lower:]')
-            dev_serial=""
-            [[ -f "$device/serial" ]] && dev_serial=$(<"$device/serial" tr '[:upper:]' '[:lower:]')
-
-            for idle_pid in "${idle_pids[@]}"; do
-                if [[ "$dev_vendor" == "$vendor" && "$dev_product" == "$idle_pid" && ( -z "$serial" || "$dev_serial" == "$serial" ) ]]; then
-                    base=$(basename "$device")
-                    log "[DOCKED] Detected $base (Product ID: $idle_pid)"
-
-                    [[ -f "$device/power/wakeup" ]] && \
-                        log "[WAKEUP] was: $(cat "$device/power/wakeup")" && \
-                        echo enabled > "$device/power/wakeup" && \
-                        log "[WAKEUP] enabled for $base"
-
-                    log_cmd_output "udevadm info for $base:" udevadm info --name="/dev/bus/usb/${base//-//}" --attribute-walk
-
-                    sleep 1
-                    break 3
+            for ((i=0; i<timeout_secs; i++)); do
+                sleep 1
+                if ! is_controller_connected "$vendor" "$product"; then
+                    log "[SUSPEND] Controller disconnected after $i seconds. Suspending allowed."
+                    exit 0
                 fi
             done
-        done
-        sleep 1
-        ((timeout--))
-    done
-done
 
-for entry in "${MATCHED_DEVICES[@]}"; do
-    IFS="|" read -r DONGLE _ <<< "$entry"
-    log "[REBIND] $DONGLE"
-    if [[ -e "/sys/bus/usb/devices/$DONGLE" && ! -e "$DRIVER_PATH/$DONGLE" ]]; then
-        echo "$DONGLE" > "$DRIVER_PATH/bind"
-    else
-        log "[REBIND] Already bound or busy: $DONGLE"
+            log "[SUSPEND] Controller still connected after ${timeout_secs}s. Restarting EmulationStation instead of suspending..."
+			batocera-es-swissknife --restart
+			exit 0
+        fi
     fi
-done
+done < "$CONFIG"
 
-log "[DONE] Suspend preparation complete."
+if ! $matched_any && ! $ALLOW_SUSPEND_IF_NO_MATCH; then
+    log "[SUSPEND] No known devices matched and ALLOW_SUSPEND_IF_NO_MATCH=false. Suspend blocked."
+    exit 1
+fi
+
+log "[SUSPEND] No blocking conditions met. Suspending allowed."
 exit 0
