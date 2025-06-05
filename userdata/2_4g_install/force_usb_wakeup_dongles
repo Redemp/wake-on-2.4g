@@ -38,7 +38,8 @@ mapfile -t known_entries < <(
 
 for line in "${known_entries[@]}"; do
     # Split vendor, product, serial — stop after 3 fields
-    IFS=':' read -r vendor product serial _ <<< "$line"
+	IFS=':' read -r vendor product serial_and_flags <<< "$line"
+	serial="${serial_and_flags%%:*}"
 
     if [[ -z "$vendor" || -z "$product" ]]; then
         continue

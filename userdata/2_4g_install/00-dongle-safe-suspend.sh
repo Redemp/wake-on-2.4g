@@ -29,6 +29,21 @@ log() {
     echo "[{ $(date '+%F %T') }] $*"
 }
 
+enable_parent_wakeup_chain() {
+    local device_path="$1"
+    while true; do
+        local parent_path
+        parent_path=$(readlink -f "$device_path/..")
+        [[ "$parent_path" == "$device_path" ]] && break
+        device_path="$parent_path"
+        [[ ! "$device_path" =~ /usb[0-9]+$ && ! "$device_path" =~ /[0-9-]+$ ]] && continue
+        if [[ -f "$device_path/power/wakeup" ]]; then
+            echo enabled > "$device_path/power/wakeup"
+            log "[WAKEUP] Parent wakeup enabled: $(basename "$device_path")"
+        fi
+    done
+}
+
 is_controller_connected() {
     local vendor="$1"
     local product="$2"
@@ -37,7 +52,13 @@ is_controller_connected() {
         local v=$(<"$dev/idVendor" tr '[:upper:]' '[:lower:]')
         local p=$(<"$dev/idProduct" tr '[:upper:]' '[:lower:]')
         if [[ "$v" == "$vendor" && "$p" == "$product" ]]; then
-            log "[ACTIVE CHECK] Controller is still connected (vendor=$vendor, product=$product)"
+            log "[ACTIVE CHECK] Controller is still connected (vendor=${vendor}, product=${product})"
+
+            if [[ ! -f "$dev/power/wakeup" ]]; then
+                log "[WAKEUP] No wakeup support on device — falling back to parent chain..."
+                enable_parent_wakeup_chain "$dev"
+            fi
+
             return 0
         fi
     done
